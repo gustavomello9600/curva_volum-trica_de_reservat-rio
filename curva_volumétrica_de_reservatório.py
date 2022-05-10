@@ -41,7 +41,7 @@ def simular_reservatório(t_c: Número,
     Q_s = lambda V: C_d * a * b * np.sqrt(2 * g * (h(V) - a/2)) if V > V_a else 1.838*b*(h(V)**(3/2))
 
     incremento = 1
-    while t < 24*3600*10:
+    while t < 24*3600:
         if V < V1 + V2 + V3:
             t = t + incremento
             V = V + incremento * (Q_e(t) - Q_s(V))
