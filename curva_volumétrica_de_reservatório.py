@@ -33,7 +33,7 @@ def simular_reservatório(t_c: Número,
                          C_d: Número,
                          g: Número,
                          a: Número,
-                         b: Número) -> Optional[TabelaDeDados]:
+                         b: Número) -> TabelaDeDados:
     estado_inicial = {"t": (t := 0),
                       "V": (V := 0)}
     registro = [estado_inicial]
@@ -81,39 +81,6 @@ parâmetros_de_entrada = {
 }
 
 def obter_curva_ótima() -> TabelaDeDados:
-    # Gera uma nova função de simulação que já absorveu todos os parâmetros de entrada exceto a e b
-    simular = simular_reservatório(**{k:v for k,v in parâmetros_de_entrada.items() if k not in ("a", "b")})
-
-    # Para um dado par (a, b) determina o volume máximo de água no reservatório e o tempo em que é atingido
-    def testar(a: Número, b: Número) -> Tuple[Número, Número]:
-        simulação = simular(a=a, b=b)
-        V_máx = simulação["V"].max()
-        t_cheio = simulação["V"].idxmax()
-        return V_máx, t_cheio
-
-    # Para um dado b, retorna o melhor a, o volume máximo e o tempo até ele
-    def buscar_melhor_a_dado(b: Número) -> Tuple[Optional[Número],
-                                                 Optional[Número],
-                                                 Optional[Número]]:
-        delta      = 0.1
-        a_subótimo = 0.2
-        a_ótimo    = a_subótimo + delta
-
-        V_máx   = None
-        t_cheio = None
-
-        while a_ótimo - a_subótimo > 0.01:
-            if a_subótimo > 1:
-                return None, None, None
-            V_máx, t_cheio = testar(a_ótimo, b)
-            if V_máx > 23000:
-                a_subótimo = a_ótimo
-                a_ótimo += delta
-            else:
-                delta = (a_ótimo - a_subótimo)/2
-                a_ótimo -= delta
-        return a_ótimo, V_máx, t_cheio
-
     resultados = []
     for b in range(1, 20 + 1):
         a, V_máx, t_cheio = buscar_melhor_a_dado(b)
@@ -123,6 +90,42 @@ def obter_curva_ótima() -> TabelaDeDados:
 
     return TabelaDeDados.from_records(resultados)
 
+def buscar_melhor_a_dado(b: Número) -> Tuple[Optional[Número],
+                                             Optional[Número],
+                                             Optional[Número]]:
+    """Para um dado b, retorna o melhor a, o volume máximo e o tempo até ele"""
+
+    delta      = 0.1
+    a_subótimo = 0.2
+    a_ótimo    = a_subótimo + delta
+
+    V_máx   = None
+    t_cheio = None
+
+    while a_ótimo - a_subótimo > 0.01:
+        if a_subótimo > 1:
+            return None, None, None
+        V_máx, t_cheio = testar(a_ótimo, b)
+        if V_máx > 23000:
+            a_subótimo = a_ótimo
+            a_ótimo += delta
+        else:
+            delta = (a_ótimo - a_subótimo)/2
+            a_ótimo -= delta
+
+    return a_ótimo, V_máx, t_cheio
+
+def testar(a: Número, b: Número) -> Tuple[Número, Número]:
+    """Para um dado par (a, b) determina o volume máximo de água
+    no reservatório e o tempo em que é atingido"""
+
+    simulação = simular(a=a, b=b)
+    V_máx = simulação["V"].max()
+    t_cheio = simulação["V"].idxmax()
+    return V_máx, t_cheio
+
+# Gera uma nova função de simulação que já absorveu todos os parâmetros de entrada exceto a e b
+simular = simular_reservatório(**{k:v for k,v in parâmetros_de_entrada.items() if k not in ("a", "b")})
 
 otimizar_orifício()
 # Usado para encontrar melhores dimensões a (altura) e b (largura) para o orifício retangular
