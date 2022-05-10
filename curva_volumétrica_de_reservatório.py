@@ -1,27 +1,30 @@
 from pathlib import Path
-from typing import Dict, Union, Optional, Callable
+from typing import Union, Tuple, Optional
 
 from toolz import curry
 import numpy as np
 import pandas as pd
 
-IO = None
-Número = Union[int, float]
+
+# Tipos para as variáveis e efeitos das funções
+Número           = Union[int, float]
+TabelaDeDados    = pd.DataFrame
+EscritaEmArquivo = None
 
 
-def gerar_curva_volumétrica() -> IO:
-    exportar_para_csv("simulação.csv",
-                      simular_reservatório(**parâmetros_de_entrada))
-
-def otimizar_orifício() -> IO:
+def otimizar_orifício() -> EscritaEmArquivo:
     exportar_para_csv("busca_por_a_e_b_ótimos.csv",
                       obter_curva_ótima())
 
-def exportar_para_csv(nome_do_arquivo: str, dados: pd.DataFrame) -> IO:
+def gerar_curva_volumétrica() -> EscritaEmArquivo:
+    exportar_para_csv("simulação.csv",
+                      simular_reservatório(**parâmetros_de_entrada))
+
+def exportar_para_csv(nome_do_arquivo: str, dados: TabelaDeDados) -> EscritaEmArquivo:
     with open(Path(nome_do_arquivo), "w") as arquivo:
         dados.to_csv(arquivo)
 
-@curry
+@curry # Permite a criação de funções parciais com alguns dos argumentos fixos
 def simular_reservatório(t_c: Número,
                          V1: Número,
                          V2: Número,
@@ -30,50 +33,74 @@ def simular_reservatório(t_c: Número,
                          C_d: Número,
                          g: Número,
                          a: Número,
-                         b: Número) -> Optional[pd.DataFrame]:
+                         b: Número) -> Optional[TabelaDeDados]:
     estado_inicial = {"t": (t := 0),
                       "V": (V := 0)}
     registro = [estado_inicial]
 
+    # Volume até o qual o orifício opera como vertedor
     V_a = 3600*a
-    h = lambda V: V/3600 if V < V1 else (V + 5400)/9000 if V < V1 + V2 else (V + 29000)/20800
-    Q_e = lambda t: (Q_pico/t_c)*t if t < t_c else (Q_pico/t_c)*(2*t_c - t) if t < 2*t_c else 0
-    Q_s = lambda V: C_d * a * b * np.sqrt(2 * g * (h(V) - a/2)) if V > V_a else 1.838*b*(h(V)**(3/2))
 
-    incremento = 1
-    while t < 5*3600:
-        if V < V1 + V2 + V3:
+    # Altura da lâmina d'água como função do volume de água no reservatório
+    h = lambda V: V/3600            if V < V1      \
+             else (V + 5400)/9000   if V < V1 + V2 \
+             else (V + 29000)/20800
+
+    # Vazão de entrada em função do tempo pelo hidrograma unitário
+    Q_e = lambda t: (Q_pico/t_c)*t           if t < t_c   \
+               else (Q_pico/t_c)*(2*t_c - t) if t < 2*t_c \
+               else 0
+
+    # Vazão de saída em função do volume
+    Q_s = lambda V: C_d * a * b * np.sqrt(2 * g * (h(V) - a/2)) if V > V_a \
+               else 1.838*b*(h(V)**(3/2))
+
+    incremento  = 1      #em segundos
+    cinco_horas = 5*3600 #em segundos
+    V_total = V1 + V2 + V3
+    while t < cinco_horas:
+        if V < V_total:
             t = t + incremento
-            V = V + incremento * (Q_e(t) - Q_s(V))
+            V = V + incremento * (Q_e(t) - Q_s(V)) # Da EDO: dV/dt = Q_e(t) - Q_s(V)
             registro.append({"t": t, "V": V})
         else:
-            return pd.DataFrame.from_records(registro)
-    return pd.DataFrame.from_records(registro)
+            return TabelaDeDados.from_records(registro)
+    return TabelaDeDados.from_records(registro)
 
 parâmetros_de_entrada = {
-    "t_c": 3600,
-    "V1": 3600,
-    "V2": 9000,
-    "V3": 10400,
-    "Q_pico": 29.7738,
-    "C_d": 0.61,
-    "g": 9.78,
-    "a": 0.5,
-    "b": 10
+    "t_c": 3600,        # Tempo de Concentração em segundos
+    "V1": 3600,         # Volume do primeiro patamar do reservatório em m³
+    "V2": 9000,         # Volume do segundo patamar do reservatório em m³
+    "V3": 10400,        # Volume do terceiro patamar do reservatório em m³
+    "Q_pico": 29.7738,  # Vazão de pico calculada pelo método racional em m³/s
+    "C_d": 0.61,        # Coeficiente de descarga
+    "g": 9.78,          # Aceleração da gravidade em m/s²
+
+    "a": 0.5,           # Altura do orifício em metros
+    "b": 10             # Largura do orifício em metros
 }
 
-def obter_curva_ótima() -> pd.DataFrame:
+def obter_curva_ótima() -> TabelaDeDados:
+    # Gera uma nova função de simulação que já absorveu todos os parâmetros de entrada exceto a e b
     simular = simular_reservatório(**{k:v for k,v in parâmetros_de_entrada.items() if k not in ("a", "b")})
-    def testar(a, b):
+
+    # Para um dado par (a, b) determina o volume máximo de água no reservatório e o tempo em que é atingido
+    def testar(a: Número, b: Número) -> Tuple[Número, Número]:
         simulação = simular(a=a, b=b)
         V_máx = simulação["V"].max()
         t_cheio = simulação["V"].idxmax()
         return V_máx, t_cheio
 
-    def buscar_melhor_a_dado(b):
-        delta = 0.1
+    # Para um dado b, retorna o melhor a, o volume máximo e o tempo até ele
+    def buscar_melhor_a_dado(b: Número) -> Tuple[Optional[Número],
+                                                 Optional[Número],
+                                                 Optional[Número]]:
+        delta      = 0.1
         a_subótimo = 0.2
-        a_ótimo = a_subótimo + delta
+        a_ótimo    = a_subótimo + delta
+
+        V_máx   = None
+        t_cheio = None
 
         while a_ótimo - a_subótimo > 0.01:
             if a_subótimo > 1:
@@ -94,7 +121,12 @@ def obter_curva_ótima() -> pd.DataFrame:
                            "Volume_máximo_atingido": V_máx,
                            "Tempo_até_volume_máximo": t_cheio})
 
-    return pd.DataFrame.from_records(resultados)
+    return TabelaDeDados.from_records(resultados)
+
+
+otimizar_orifício()
+# Usado para encontrar melhores dimensões a (altura) e b (largura) para o orifício retangular
 
 gerar_curva_volumétrica()
-otimizar_orifício()
+# Inseridos os valores desejados de a e b nos parâmetros de entrada,
+# executa a simulação do volume de água ao longo do tempo
